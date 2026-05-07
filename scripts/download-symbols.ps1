@@ -1,43 +1,59 @@
 # download-symbols.ps1
-# 从 Electron 符号服务器下载指定版本的符号文件
-# 用法: .\scripts\download-symbols.ps1 -ElectronVersion "32.0.0"
+# 从 Electron 符号服务器下载指定版本的符号文件到本地缓存
+# 用法: .\scripts\download-symbols.ps1 -ElectronVersion "39.4.0" [-Proxy "http://127.0.0.1:7897"]
 
 param(
     [Parameter(Mandatory=$true)]
-    [string]$ElectronVersion
+    [string]$ElectronVersion,
+
+    [Parameter(Mandatory=$false)]
+    [string]$Proxy = ""
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path $PSScriptRoot -Parent
 $SymbolsDir = Join-Path $ProjectRoot "symbols"
+$BreakpadDir = Join-Path $SymbolsDir "breakpad_symbols"
 
-if (-not (Test-Path $SymbolsDir)) {
-    New-Item -ItemType Directory -Path $SymbolsDir -Force | Out-Null
+$ProxyEnv = @{}
+if ($Proxy) {
+    $ProxyEnv = @{ HTTP_PROXY = $Proxy; HTTPS_PROXY = $Proxy }
+    Write-Host "使用代理: $Proxy" -ForegroundColor Cyan
 }
 
 Write-Host "下载 Electron v$ElectronVersion 符号文件..." -ForegroundColor Cyan
-Write-Host "符号目录: $SymbolsDir"
+
+$SymbolsZipName = "electron-v${ElectronVersion}-win32-x64-symbols.zip"
+$SymbolsZipUrl = "https://github.com/electron/electron/releases/download/v${ElectronVersion}/${SymbolsZipName}"
+$ZipPath = Join-Path $SymbolsDir "electron-symbols.zip"
+
+# 确保目录存在
+if (-not (Test-Path $BreakpadDir)) {
+    New-Item -ItemType Directory -Path $BreakpadDir -Force | Out-Null
+}
+
+Write-Host "下载: $SymbolsZipUrl"
+Invoke-WebRequest -Uri $SymbolsZipUrl -OutFile $ZipPath -UseBasicParsing @ProxyEnv
+
+Write-Host "解压到 $BreakpadDir ..."
+Expand-Archive -Path $ZipPath -DestinationPath $BreakpadDir -Force
+Remove-Item $ZipPath -Force
+
+# 验证
+$symCount = (Get-ChildItem -Path $BreakpadDir -Recurse -Filter "*.sym" -ErrorAction SilentlyContinue).Count
 Write-Host ""
+Write-Host "安装完成! 共 $symCount 个符号文件" -ForegroundColor Green
 
-# Electron 符号服务器基础 URL
-$BaseUrl = "https://symbols.electronjs.org"
+$electronSym = Get-ChildItem -Path $BreakpadDir -Recurse -Filter "electron.exe.sym" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($null -ne $electronSym) {
+    Write-Host "  electron.exe.sym: $($electronSym.FullName)"
+}
 
-# Electron 主要模块的符号文件列表
-$SymbolFiles = @(
-    "electron.exe.pdb",
-    "ffmpeg.dll.pdb",
-    "chrome_child.dll.pdb",
-    "v8.dll.pdb",
-    "v8_libbase.dll.pdb",
-    "v8_libplatform.dll.pdb",
-    "icudtl.dat.pdb",
-    "snapshot_blob.bin.pdb"
-)
-
-# 注意：符号服务器需要正确的 GUID/age 路径才能下载
-# 这里提供的是查询接口，实际下载需要从 dump 文件中提取 GUID
-Write-Host "提示: 符号文件需要根据 crash dump 中的 GUID 精确下载。" -ForegroundColor Yellow
-Write-Host "推荐使用 analyze.ps1 自动处理符号下载。" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "如需手动配置 WinDbg 符号路径，使用:" -ForegroundColor Cyan
-Write-Host "  SRV*$SymbolsDir*https://msdl.microsoft.com/download/symbols;SRV*$SymbolsDir*https://symbols.electronjs.org"
+# 提取 debug_id
+if ($null -ne $electronSym) {
+    $firstLine = Get-Content $electronSym.FullName -TotalCount 1
+    if ($firstLine -match "^MODULE windows (x86|amd64|arm64) ([A-F0-9]+) ") {
+        $debugId = $matches[2]
+        Write-Host "  debug_id: $debugId"
+    }
+}
