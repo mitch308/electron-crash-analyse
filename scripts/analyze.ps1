@@ -1,4 +1,4 @@
-# analyze.ps1
+﻿# analyze.ps1
 # 分析 Electron crash dump 文件
 # 用法: .\scripts\analyze.ps1 <path-to-dump-file> [-ElectronVersion "39.4.0"] [-Proxy "http://127.0.0.1:7897"] [-Json]
 
@@ -17,14 +17,19 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# 设置控制台编码为 UTF-8，避免中文输出乱码
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
 $ProjectRoot = Split-Path $PSScriptRoot -Parent
 $ToolsDir = Join-Path $ProjectRoot "tools"
 $SymbolsDir = Join-Path $ProjectRoot "symbols"
 $BreakpadDir = Join-Path $SymbolsDir "breakpad_symbols"
 $ReportsDir = Join-Path $ProjectRoot "reports"
 
-# Proxy 配置
-$ProxyEnv = @{}
+# Proxy 配置（环境变量传递给 minidump-stackwalk 子进程）
 if ($Proxy) {
     $env:HTTP_PROXY = $Proxy
     $env:HTTPS_PROXY = $Proxy
@@ -39,7 +44,8 @@ if (-not (Test-Path $DumpPath)) {
 
 $DumpFile = Get-Item $DumpPath
 Write-Host "分析 dump: $($DumpFile.FullName)" -ForegroundColor Cyan
-Write-Host "  大小: $([Math]::Round($DumpFile.Length / 1MB, 1)) MB"
+$sizeMB = [Math]::Round($DumpFile.Length / 1MB, 1)
+Write-Host "  大小: $sizeMB MB"
 Write-Host ""
 
 # 查找 minidump-stackwalk
@@ -72,7 +78,7 @@ if (Test-Path $BreakpadDir) {
     $symCount = (Get-ChildItem -Path $BreakpadDir -Recurse -Filter "*.sym" -ErrorAction SilentlyContinue).Count
     if ($symCount -gt 0) {
         $SymbolPaths += $BreakpadDir
-        Write-Host "本地符号: $BreakpadDir ($symCount 个文件)" -ForegroundColor Green
+        Write-Host "本地符号: $BreakpadDir (${symCount} 个文件)" -ForegroundColor Green
     }
 }
 
@@ -84,10 +90,10 @@ $SymbolPaths += "https://symbols.electronjs.org"
 Write-Host ""
 Write-Host "--- 提取模块信息 ---" -ForegroundColor Cyan
 
-$JsonReportPath = Join-Path $ReportsDir "$([System.IO.Path]::GetFileNameWithoutExtension($DumpFile.Name))-modules.json"
+$dumpBaseName = [System.IO.Path]::GetFileNameWithoutExtension($DumpFile.Name)
+$JsonReportPath = Join-Path $ReportsDir "$dumpBaseName-modules.json"
 
-$stackwalkArgs = @($StackwalkExe.FullName, "--symbols-path", $SymbolsDir, "--json", $DumpFile.FullName)
-$jsonOutput = & $stackwalkArgs 2>&1 | Out-String
+$jsonOutput = & $StackwalkExe.FullName --symbols-path $SymbolsDir --json $DumpFile.FullName 2>&1 | Out-String
 $jsonOutput | Out-File -FilePath $JsonReportPath -Encoding utf8
 
 # ==================== 步骤 B: 生成人类可读报告 ====================
@@ -96,10 +102,6 @@ if (-not $Json) {
     Write-Host ""
     Write-Host "--- 生成人类可读报告 ---" -ForegroundColor Cyan
     Write-Host ""
-
-    # 构建符号路径参数
-    $symbolsArg = "--symbols-path"
-    $symbolsValue = $SymbolsDir
 
     # 如果指定了 Electron 版本且本地没有完整符号，先尝试下载
     if ($ElectronVersion -and $symCount -eq 0) {
@@ -116,7 +118,9 @@ if (-not $Json) {
     Write-Host "输出报告: $ReportPath"
     Write-Host ""
 
-    & $StackwalkExe.FullName --symbols-path $SymbolsDir $DumpFile.FullName 2>&1 | Tee-Object -FilePath $ReportPath
+    $stackwalkOutput = & $StackwalkExe.FullName --symbols-path $SymbolsDir $DumpFile.FullName 2>&1 | Out-String
+    $stackwalkOutput | Out-File -FilePath $ReportPath -Encoding utf8
+    Write-Host $stackwalkOutput
 
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""
@@ -125,7 +129,7 @@ if (-not $Json) {
         Write-Host "  模块信息(JSON): $JsonReportPath"
     } else {
         Write-Host ""
-        Write-Host "ERROR: 分析失败 (exit code: $LASTEXITCODE)" -ForegroundColor Red
+        Write-Host "ERROR: 分析失败 (exit code: ${LASTEXITCODE})" -ForegroundColor Red
         exit $LASTEXITCODE
     }
 } else {

@@ -10,3 +10,6 @@ reports/*.json
 
 # Tools binary (can be re-downloaded via install-tools.ps1)
 tools/*
+
+# Test electron (can be re-downloaded)
+test-electron
