@@ -52,27 +52,84 @@ WinDbg 符号路径格式：`SRV*C:\workspace\electron-crash\symbols*https://msd
 
 详细分析流程和常见崩溃模式（变长结构体越界、V8 ABI 不兼容、Native DLL 加载失败）见 `ANALYSIS-GUIDE.md`。
 
-## Knowledge System
+## Dump 分析 SOP（标准操作流程）
 
-项目维护崩溃分析知识库 `knowledge/`，跨会话积累分析经验。一条知识一个文件，通过索引按需读取。
+当用户要求分析 crash dump 时，**必须严格按以下步骤执行**，不得跳过或省略任何步骤。
 
-### 分析流程
-1. 先调用 analyze.ps1 生成报告（知识库不影响脚本执行）
-2. 读取 `knowledge/README.md` 索引
-3. 根据报告中的崩溃类型、关键模块、偏移量等，按需读取对应知识文件（不要全量加载）
-4. 结合知识库分析报告，输出诊断结果
+### 步骤 1：检测版本并生成报告
 
-### 总结流程
-分析完成后评估是否产生新知识（新崩溃模式、新模块识别、新偏移含义、新版本兼容问题）：
-- 有新知识 → 检查 `knowledge/README.md` 索引中是否已有相同去重键
-  - 已有 → 打开对应文件补充信息（追加来源、修正描述），更新索引摘要如有变化
-  - 没有 → 在对应类别目录下创建新文件（文件名用去重键的 kebab-case），在索引中新增一行
-- 无新知识 → 不写入
+```powershell
+$ver = .\scripts\detect-version.ps1 .\dumps\<dump-file>
+.\scripts\analyze.ps1 .\dumps\<dump-file> -ElectronVersion $ver
+```
 
-### 去重键规则
-| 知识类型 | 去重键 | 文件名示例 |
-|---------|--------|-----------|
-| 崩溃模式 | 崩溃类型 + 关键模块 | `STATUS_HEAP_CORRUPTION-SogouTSF.md` |
-| 模块识别 | 模块文件名 | `tmp-node.md` |
-| 偏移量含义 | 模块名 + 偏移量 | `ntdll-0xff489.md` |
-| 版本兼容 | Electron版本 + 问题模块 | `electron-39.4.0-koffi.md` |
+等待脚本执行完成，确认 `reports/` 下生成了 `<dump-id>.txt` 和 `<dump-id>-modules.json`。
+
+### 步骤 2：读取报告关键信息
+
+读取生成的 `<dump-id>.txt` 报告，提取以下关键信息（逐项确认，不可遗漏）：
+
+1. **Crash reason** — 崩溃类型（如 `STATUS_HEAP_CORRUPTION`、`EXCEPTION_ACCESS_VIOLATION_READ`）
+2. **Crash address** — 崩溃地址
+3. **Crashing instruction** — 崩溃指令
+4. **Process uptime** — 进程运行时间（< 10s = 初始化阶段，大概率确定性崩溃）
+5. **Crashing thread** — 崩溃线程编号和名称
+6. **崩溃堆栈** — 崩溃线程的完整调用栈，从帧 #0 开始逐帧记录
+7. **关键模块** — 堆栈中出现的非常规模块（非 ntdll/kernel32 等系统模块）
+
+### 步骤 3：查询知识库
+
+读取 `knowledge/README.md` 索引，根据步骤 2 提取的关键信息，按需读取相关知识文件：
+
+- 崩溃类型匹配 → 读取 `crash-patterns/` 下对应条目
+- 堆栈中出现无名/陌生模块 → 读取 `module-registry/` 下对应条目
+- 堆栈中有未符号化的模块偏移 → 读取 `offset-database/` 下对应条目
+- 涉及特定 Electron 版本 → 读取 `version-compatibility/` 下对应条目
+
+**不要全量加载知识文件**，只读取与当前报告相关的条目。
+
+### 步骤 4：按 ANALYSIS-GUIDE.md 分析报告
+
+参照 `ANALYSIS-GUIDE.md` 中的分析方法和常见崩溃模式，结合知识库中的历史经验，对报告进行诊断。分析输出必须包含以下部分：
+
+**1. 崩溃概述**（一段话总结）
+- 崩溃类型 + 崩溃地址 + 崩溃线程 + 进程运行时间
+
+**2. 根因分析**（核心部分）
+- 从崩溃堆栈的帧 #0 开始，从下往上读调用链
+- 识别崩溃点（帧 #0）属于哪个模块，该模块的作用是什么
+- 如果帧 #0 是未符号化的模块（只有 `module + offset`），尝试在知识库的 module-registry 中查找其真实身份
+- 如果堆栈中出现 V8 内部函数（如 `JSObject::AddDataElement`、`Object::SetProperty`），说明是 V8 ABI 层面的问题
+- 如果堆栈中出现 `napi_*` 函数，说明是 Node.js native addon 调用
+- 如果堆栈中出现 `LoadLibrary` / `dlopen`，说明是 DLL 加载问题
+
+**3. 崩溃模式匹配**
+- 将当前崩溃特征与知识库 `crash-patterns/` 中的已知模式对比
+- 如果匹配到已知模式，引用该模式并给出对应修复建议
+- 如果未匹配到已知模式，标注为"新崩溃模式"
+
+**4. 修复建议**（可操作的步骤）
+- 给出具体的修复方案，而非笼统的建议
+- 如果需要重新编译模块，给出具体的 `electron-rebuild` 命令
+- 如果需要修改代码，指出具体文件和修改方向
+
+### 步骤 5：总结并写入知识库
+
+**这是必须执行的步骤，不得跳过。** 分析完成后，评估本次分析是否产生了新知识：
+
+评估以下 4 类知识，对每类给出"有新知识"或"无新知识"的判定：
+
+1. **新崩溃模式** — 当前崩溃的特征组合（崩溃类型 + 关键模块）是否在 `knowledge/crash-patterns/` 中无对应条目？
+2. **新模块识别** — 堆栈中是否有无名/陌生模块被成功识别，且该模块在 `knowledge/module-registry/` 中无对应条目？
+3. **新偏移量含义** — 是否有未符号化的模块偏移被成功解析出函数名，且该偏移在 `knowledge/offset-database/` 中无对应条目？
+4. **新版本兼容问题** — 是否发现了与特定 Electron 版本相关的新兼容问题，且该版本+模块组合在 `knowledge/version-compatibility/` 中无对应条目？
+
+**如果全部为"无新知识"** → 不写入任何内容，结束。
+
+**如果任意一项为"有新知识"** → 执行写入：
+
+1. 读取 `knowledge/README.md` 索引，确认去重键是否已存在
+2. 去重键已存在 → 打开对应文件，补充新信息（追加来源、修正描述），如果摘要信息变化则更新索引
+3. 去重键不存在 → 在对应类别目录下创建新 Markdown 文件（文件名 = 去重键的 kebab-case），在 `knowledge/README.md` 索引中新增一行链接
+
+写入后，确认索引与文件一一对应。
