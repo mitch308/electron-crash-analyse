@@ -10,6 +10,7 @@
 
 ## module-registry/
 - [.tmp.node](module-registry/tmp-node.md) — koffi/FFI 临时解压模块
+- [N-API 调用模式识别](module-registry/napi-call-patterns.md) — 堆栈函数组合与可能库的对照表
 
 ## offset-database/
 - [ntdll.dll + 0xff489](offset-database/ntdll-0xff489.md) — RtlReportFatalHeapCorruption

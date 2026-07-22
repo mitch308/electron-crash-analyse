@@ -47,7 +47,7 @@ WinDbg 符号路径格式：`SRV*C:\workspace\electron-crash\symbols*https://msd
 
 ## Analysis Guide
 
-详细分析流程和常见崩溃模式（变长结构体越界、V8 ABI 不兼容、Native DLL 加载失败）见 `ANALYSIS-GUIDE.md`。
+常见崩溃模式（变长结构体越界、V8 ABI 不兼容、Native DLL 加载失败）和调用模式识别见知识库 `knowledge/crash-patterns/` 和 `knowledge/module-registry/napi-call-patterns.md`。
 
 ## Dump 分析 SOP（标准操作流程）
 
@@ -84,9 +84,9 @@ WinDbg 符号路径格式：`SRV*C:\workspace\electron-crash\symbols*https://msd
 
 **不要全量加载知识文件**，只读取与当前报告相关的条目。
 
-### 步骤 4：按 ANALYSIS-GUIDE.md 分析报告
+### 步骤 4：分析报告
 
-参照 `ANALYSIS-GUIDE.md` 中的分析方法和常见崩溃模式，结合知识库中的历史经验，对报告进行诊断。分析输出必须包含以下部分：
+结合知识库中的历史经验，对报告进行诊断。分析输出必须包含以下部分：
 
 **1. 崩溃概述**（一段话总结）
 - 崩溃类型 + 崩溃地址 + 崩溃线程 + 进程运行时间
