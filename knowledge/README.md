@@ -12,8 +12,7 @@
 - [.tmp.node](module-registry/tmp-node.md) — koffi/FFI 临时解压模块
 
 ## offset-database/
-
-（暂无条目）
+- [ntdll.dll + 0xff489](offset-database/ntdll-0xff489.md) — RtlReportFatalHeapCorruption
 
 ## version-compatibility/
 
