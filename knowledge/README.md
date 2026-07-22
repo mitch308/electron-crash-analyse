@@ -15,5 +15,4 @@
 - [ntdll.dll + 0xff489](offset-database/ntdll-0xff489.md) — RtlReportFatalHeapCorruption
 
 ## version-compatibility/
-
-（暂无条目）
+- [Electron 39.4.0 + koffi](version-compatibility/electron-39.4.0-koffi.md) — 变长结构体越界问题
