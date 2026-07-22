@@ -51,3 +51,28 @@ WinDbg 符号路径格式：`SRV*C:\workspace\electron-crash\symbols*https://msd
 ## Analysis Guide
 
 详细分析流程和常见崩溃模式（变长结构体越界、V8 ABI 不兼容、Native DLL 加载失败）见 `ANALYSIS-GUIDE.md`。
+
+## Knowledge System
+
+项目维护崩溃分析知识库 `knowledge/`，跨会话积累分析经验。一条知识一个文件，通过索引按需读取。
+
+### 分析流程
+1. 先调用 analyze.ps1 生成报告（知识库不影响脚本执行）
+2. 读取 `knowledge/README.md` 索引
+3. 根据报告中的崩溃类型、关键模块、偏移量等，按需读取对应知识文件（不要全量加载）
+4. 结合知识库分析报告，输出诊断结果
+
+### 总结流程
+分析完成后评估是否产生新知识（新崩溃模式、新模块识别、新偏移含义、新版本兼容问题）：
+- 有新知识 → 检查 `knowledge/README.md` 索引中是否已有相同去重键
+  - 已有 → 打开对应文件补充信息（追加来源、修正描述），更新索引摘要如有变化
+  - 没有 → 在对应类别目录下创建新文件（文件名用去重键的 kebab-case），在索引中新增一行
+- 无新知识 → 不写入
+
+### 去重键规则
+| 知识类型 | 去重键 | 文件名示例 |
+|---------|--------|-----------|
+| 崩溃模式 | 崩溃类型 + 关键模块 | `STATUS_HEAP_CORRUPTION-SogouTSF.md` |
+| 模块识别 | 模块文件名 | `tmp-node.md` |
+| 偏移量含义 | 模块名 + 偏移量 | `ntdll-0xff489.md` |
+| 版本兼容 | Electron版本 + 问题模块 | `electron-39.4.0-koffi.md` |
