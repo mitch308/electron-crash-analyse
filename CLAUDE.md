@@ -61,32 +61,65 @@ WinDbg 符号路径格式：`SRV*C:\workspace\electron-crash\symbols*https://msd
 
 该脚本会自动检测 Electron 版本、安装缺失工具和符号、生成分析报告。等待脚本执行完成，确认 `reports/` 下生成了 `<dump-id>.txt` 和 `<dump-id>-modules.json`。
 
-### 步骤 2：读取报告关键信息
+### 步骤 2：解读报告
 
-读取生成的 `<dump-id>.txt` 报告，提取以下关键信息（逐项确认，不可遗漏）：
+读取生成的 `<dump-id>.txt` 报告，逐项提取并解读以下关键信息：
 
-1. **Crash reason** — 崩溃类型（如 `STATUS_HEAP_CORRUPTION`、`EXCEPTION_ACCESS_VIOLATION_READ`）
-2. **Crash address** — 崩溃地址
-3. **Crashing instruction** — 崩溃指令
-4. **Process uptime** — 进程运行时间（< 10s = 初始化阶段，大概率确定性崩溃）
-5. **Crashing thread** — 崩溃线程编号和名称
-6. **崩溃堆栈** — 崩溃线程的完整调用栈，从帧 #0 开始逐帧记录
-7. **关键模块** — 堆栈中出现的非常规模块（非 ntdll/kernel32 等系统模块）
+**1. 崩溃基本信息（报告头部）**
+
+- **Crash reason** — 崩溃类型
+  - `EXCEPTION_ACCESS_VIOLATION_READ/WRITE` → 内存访问违规，通常是越界或 UAF
+  - `STATUS_HEAP_CORRUPTION` → 堆损坏
+- **Crash address** — 崩溃地址
+  - 落在 `guard page` → 读/写了已释放的堆内存
+- **Crashing instruction** — 崩溃指令（如 `mov eax, dword [r10]`）
+- **Process uptime** — 进程运行时间
+  - `< 10s` → 初始化阶段崩溃，大概率是确定性的
+  - `> 60s` → 运行时崩溃，可能与特定操作触发有关
+
+**2. 崩溃堆栈（crashed 线程）**
+
+逐帧读取崩溃线程的调用栈，解读方法：
+- 帧 #0 是崩溃点，识别它属于哪个模块
+- 帧 #1~#N 是调用链，**从下往上读**：哪个函数 → 调用了什么 → 最终崩溃
+- 未符号化的帧（只有 `module + offset`，无函数名）→ 记录模块名和偏移量，待步骤 3 查知识库识别
+- 堆栈中出现 `napi_*` 函数 → Node.js native addon 调用
+- 堆栈中出现 V8 内部函数（如 `JSObject::AddDataElement`、`Object::SetProperty`）→ V8 ABI 层面的问题
+- 堆栈中出现 `LoadLibrary` / `dlopen` → DLL 加载问题
+
+**3. 关键模块**
+
+从堆栈和 JSON 模块列表中提取非常规模块（非 ntdll/kernel32 等系统模块），重点关注：
+- `.tmp.node` / `.node` 文件 → native addon
+- 业务 DLL（如 `liblibpass.dll`）→ 应用自有模块
+- 第三方 IME（如 `SogouTSF.ime`）→ 输入法等外部干扰
+
+**4. 调用链模式识别**
+
+根据堆栈中的函数组合，推断可能的原生模块来源：
+
+| 堆栈中的函数组合 | 可能的库/模块 |
+|-----------------|-------------|
+| `napi_create_object` + FFI 库 + `.tmp.node` | koffi, ffi-napi, node-ffi |
+| `napi_create_object` + 业务 DLL | 自定义原生模块 |
+| `WlanOpenHandle` / `WlanEnumInterfaces` | wlanapi.dll 调用者（WiFi 扫描） |
+| `JSObject::AddDataElement` + guard page | V8 内存布局不匹配（变长结构体越界或 ABI 不兼容） |
+| `LoadLibrary` / `dlopen` | DLL 动态加载失败 |
 
 ### 步骤 3：查询知识库
 
-读取 `knowledge/README.md` 索引，根据步骤 2 提取的关键信息，按需读取相关知识文件：
+读取 `knowledge/README.md` 索引，根据步骤 2 解读出的关键信息，按需读取相关知识文件：
 
-- 崩溃类型匹配 → 读取 `crash-patterns/` 下对应条目
+- 崩溃类型 + 关键模块匹配 → 读取 `crash-patterns/` 下对应条目
 - 堆栈中出现无名/陌生模块 → 读取 `module-registry/` 下对应条目
 - 堆栈中有未符号化的模块偏移 → 读取 `offset-database/` 下对应条目
 - 涉及特定 Electron 版本 → 读取 `version-compatibility/` 下对应条目
 
 **不要全量加载知识文件**，只读取与当前报告相关的条目。
 
-### 步骤 4：分析报告
+### 步骤 4：综合分析并定位源码
 
-结合知识库中的历史经验，对报告进行诊断。分析输出必须包含以下部分：
+结合步骤 2 的解读和步骤 3 的知识库经验，进行综合诊断。分析输出必须包含以下部分：
 
 **1. 崩溃概述**（一段话总结）
 - 崩溃类型 + 崩溃地址 + 崩溃线程 + 进程运行时间
@@ -94,17 +127,20 @@ WinDbg 符号路径格式：`SRV*C:\workspace\electron-crash\symbols*https://msd
 **2. 根因分析**（核心部分）
 - 从崩溃堆栈的帧 #0 开始，从下往上读调用链
 - 识别崩溃点（帧 #0）属于哪个模块，该模块的作用是什么
-- 如果帧 #0 是未符号化的模块（只有 `module + offset`），尝试在知识库的 module-registry 中查找其真实身份
-- 如果堆栈中出现 V8 内部函数（如 `JSObject::AddDataElement`、`Object::SetProperty`），说明是 V8 ABI 层面的问题
-- 如果堆栈中出现 `napi_*` 函数，说明是 Node.js native addon 调用
-- 如果堆栈中出现 `LoadLibrary` / `dlopen`，说明是 DLL 加载问题
+- 如果帧 #0 是未符号化的模块，引用知识库 module-registry 中的识别结果
+- 如果匹配到知识库中的已知崩溃模式，引用该模式的根因分析
 
-**3. 崩溃模式匹配**
+**3. 源码定位**
+- 从堆栈帧 #0 的模块名，在 JSON 模块列表中搜索 `debug_name`
+- 对照项目 `package.json` 中的 native addon 依赖，确定是哪个包引入的
+- 如果是 FFI 库调用，追踪到具体的 FFI 调用代码（如 `koffi.load()`、`koffi.decode()`）
+
+**4. 崩溃模式匹配**
 - 将当前崩溃特征与知识库 `crash-patterns/` 中的已知模式对比
 - 如果匹配到已知模式，引用该模式并给出对应修复建议
 - 如果未匹配到已知模式，标注为"新崩溃模式"
 
-**4. 修复建议**（可操作的步骤）
+**5. 修复建议**（可操作的步骤）
 - 给出具体的修复方案，而非笼统的建议
 - 如果需要重新编译模块，给出具体的 `electron-rebuild` 命令
 - 如果需要修改代码，指出具体文件和修改方向
