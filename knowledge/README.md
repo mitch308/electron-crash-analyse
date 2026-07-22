@@ -9,8 +9,7 @@
 - [DLL 加载失败](crash-patterns/DLL-load-failure.md) — Native DLL 不存在或架构不匹配
 
 ## module-registry/
-
-（暂无条目）
+- [.tmp.node](module-registry/tmp-node.md) — koffi/FFI 临时解压模块
 
 ## offset-database/
 
