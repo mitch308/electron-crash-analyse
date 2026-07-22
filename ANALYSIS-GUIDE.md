@@ -2,27 +2,37 @@
 
 ## 标准分析流程
 
-### 第一步：安装与准备
+### 第一步：检测 Electron 版本
 
 ```powershell
-# 1. 安装工具（如首次使用）
-.\scripts\install-tools.ps1 -ElectronVersion "39.4.0" -Proxy "http://127.0.0.1:7897"
-
-# 2. 将 .dmp 文件放入 dumps/ 目录
-#    或直接用 analyze.ps1 指定路径
+# 从 dump 文件自动检测 Electron 版本
+$ver = .\scripts\detect-version.ps1 .\dumps\crash.dmp
 ```
 
-### 第二步：快速分析
+### 第二步：安装工具与符号
 
 ```powershell
-.\scripts\analyze.ps1 .\dumps\crash.dmp -ElectronVersion "39.4.0"
+# 首次使用或本地缺少符号时，安装 minidump-stackwalk + Electron 符号
+.\scripts\install-tools.ps1 -ElectronVersion $ver
+
+# 如需代理
+.\scripts\install-tools.ps1 -ElectronVersion $ver -Proxy "http://127.0.0.1:7897"
+```
+
+### 第三步：分析 crash dump
+
+```powershell
+.\scripts\analyze.ps1 .\dumps\crash.dmp -ElectronVersion $ver
 ```
 
 这会生成两个文件：
 - `reports/<dump-id>.txt` — 人类可读的堆栈报告
 - `reports/<dump-id>-modules.json` — JSON 格式的模块列表
 
-### 第三步：解读报告
+> **提示**: `analyze.ps1` 会在本地缺少符号时自动调用 `install-tools.ps1` 下载，
+> 所以第二步也可以跳过，直接运行第三步。
+
+### 第四步：解读报告
 
 关注以下关键信息：
 
@@ -72,7 +82,7 @@ for m in crash['modules']:
 "
 ```
 
-### 第四步：定位源码
+### 第五步：定位源码
 
 #### 通过模块名称定位
 
@@ -134,21 +144,26 @@ npx electron-rebuild -v <electron-version> -f
 
 | 工具 | 用途 | 命令 |
 |------|------|------|
-| minidump-stackwalk | 快速分析 + 符号化 | `.\scripts\analyze.ps1 <dump>` |
+| detect-version | 从 dump 检测 Electron 版本 | `.\scripts\detect-version.ps1 <dump>` |
+| install-tools | 安装工具 + 下载符号 | `.\scripts\install-tools.ps1 -ElectronVersion $ver` |
+| analyze | 分析 dump 生成报告 | `.\scripts\analyze.ps1 <dump> -ElectronVersion $ver` |
+| download-symbols | 单独下载符号 | `.\scripts\download-symbols.ps1 -ElectronVersion $ver` |
 | WinDbg Preview | 交互式深度调试 | 打开 dump → `.reload` → `!analyze -v` |
-| JSON 模块提取 | 查看加载了哪些 DLL | 解析 `*-modules.json` |
 
 ## 符号下载
 
 ```powershell
-# 方式 1：通过 install-tools 预下载（推荐）
-.\scripts\install-tools.ps1 -ElectronVersion "39.4.0"
+# 从 dump 检测版本
+$ver = .\scripts\detect-version.ps1 .\dumps\crash.dmp
 
-# 方式 2：单独下载符号
-.\scripts\download-symbols.ps1 -ElectronVersion "39.4.0"
+# 方式 1：analyze.ps1 自动拉取（本地无符号时自动下载，推荐）
+.\scripts\analyze.ps1 .\dumps\crash.dmp -ElectronVersion $ver
 
-# 方式 3：analyze.ps1 自动拉取（首次较慢）
-.\scripts\analyze.ps1 .\dumps\crash.dmp -ElectronVersion "39.4.0"
+# 方式 2：通过 install-tools 预下载
+.\scripts\install-tools.ps1 -ElectronVersion $ver
+
+# 方式 3：单独下载符号
+.\scripts\download-symbols.ps1 -ElectronVersion $ver
 ```
 
 ## 代理配置
@@ -157,6 +172,7 @@ npx electron-rebuild -v <electron-version> -f
 
 ```powershell
 $proxy = "http://127.0.0.1:7897"
-.\scripts\install-tools.ps1 -ElectronVersion "39.4.0" -Proxy $proxy
-.\scripts\analyze.ps1 .\dumps\crash.dmp -Proxy $proxy
+$ver = .\scripts\detect-version.ps1 .\dumps\crash.dmp
+.\scripts\install-tools.ps1 -ElectronVersion $ver -Proxy $proxy
+.\scripts\analyze.ps1 .\dumps\crash.dmp -ElectronVersion $ver -Proxy $proxy
 ```
