@@ -5,11 +5,13 @@
 ## crash-patterns/
 - [STATUS_HEAP_CORRUPTION + SogouTSF](crash-patterns/STATUS_HEAP_CORRUPTION-SogouTSF.md) — 搜狗输入法触发堆损坏
 - [ACCESS_VIOLATION + koffi .tmp.node](crash-patterns/ACCESS_VIOLATION-koffi-tmp-node.md) — koffi FFI 变长结构体越界
+- [EXC_BAD_ACCESS + libwifi-ffi.dylib](crash-patterns/EXC_BAD_ACCESS-libwifi-ffi.md) — WiFi FFI 原生模块空指针访问
 - [V8 ABI 不兼容](crash-patterns/V8-ABI-incompatibility.md) — 原生模块与 Electron V8 版本不匹配
 - [DLL 加载失败](crash-patterns/DLL-load-failure.md) — Native DLL 不存在或架构不匹配
 
 ## module-registry/
 - [.tmp.node](module-registry/tmp-node.md) — koffi/FFI 临时解压模块
+- [libwifi-ffi.dylib](module-registry/libwifi-ffi.md) — 应用自带 WiFi 原生 FFI 模块
 
 ## offset-database/
 - [ntdll.dll + 0xff489](offset-database/ntdll-0xff489.md) — RtlReportFatalHeapCorruption
